@@ -1,7 +1,5 @@
 [workspace]
 package = { edition = "2024", version = "0.1.0" }
 resolver = "2"
-members = ["server", "client"]
-
-[dependencies]
-bollard = "0.19.3"
+members = ["client"]
+default-members = ["client"]

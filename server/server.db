@@ -1,0 +1,26 @@
+-- Workers table (trust score)
+CREATE TABLE workers (
+    worker_id TEXT PRIMARY KEY,
+    trust INT DEFAULT 10
+);
+
+-- Tasks table
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    input REAL NOT NULL,
+    price INTEGER NOT NULL,
+    assigned_to TEXT,
+    completed BOOLEAN DEFAULT 0,
+    verified BOOLEAN DEFAULT 0,
+    redundancy INT DEFAULT 3,
+    results_collected INT DEFAULT 0
+);
+
+-- Results table
+CREATE TABLE results (
+    id TEXT PRIMARY KEY,
+    worker TEXT NOT NULL,
+    output REAL NOT NULL,
+    verified BOOLEAN DEFAULT 0
+);
