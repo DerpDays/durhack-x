@@ -50,7 +50,7 @@ public class LoginFrame extends JFrame {
         formPanel.add(new JLabel("Server:"), gbc);
         
         gbc.gridx = 1;
-        serverField = new JTextField("localhost", 20);
+        serverField = new JTextField("team54-thickapp.durhack.qwerty.technology", 20);
         formPanel.add(serverField, gbc);
 
         // Port

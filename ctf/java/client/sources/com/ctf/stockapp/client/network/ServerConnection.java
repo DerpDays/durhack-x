@@ -6,8 +6,10 @@ import java.io.*;
 import java.net.Socket;
 
 public class ServerConnection {
-    private static final String DEFAULT_HOST = "localhost";
+    private static final String DEFAULT_HOST = "team54-thickapp.durhack.qwerty.technology";
     private static final int DEFAULT_PORT = 9999;
+    private static final boolean DEBUG = Boolean.parseBoolean(
+        System.getProperty("stockapp.debug", "true"));
 
     private String host;
     private int port;
@@ -36,12 +38,25 @@ public class ServerConnection {
             connect();
         }
         
+        if (DEBUG && request != null) {
+            log("[TX] " + request.getClass().getSimpleName()
+                + " token=" + request.getSessionToken());
+        }
+
         out.writeObject(request);
         out.flush();
         
         Object response = in.readObject();
         if (response instanceof Response) {
-            return (Response) response;
+            Response typed = (Response) response;
+            if (DEBUG) {
+                Object data = typed.getData();
+                String dataInfo = (data == null) ? "null" : data.getClass().getName();
+                log("[RX] success=" + typed.isSuccess()
+                    + " message=" + typed.getMessage()
+                    + " data=" + dataInfo);
+            }
+            return typed;
         }
         throw new IOException("Invalid response from server");
     }
@@ -63,5 +78,10 @@ public class ServerConnection {
     public void setPort(int port) {
         this.port = port;
     }
-}
 
+    private void log(String message) {
+        if (DEBUG) {
+            System.out.println("[StockClient] " + message);
+        }
+    }
+}

@@ -20,6 +20,10 @@ public class TradingFrame extends JFrame {
     private JTable portfolioTable;
     private DefaultTableModel stocksTableModel;
     private DefaultTableModel portfolioTableModel;
+    private JTextField sessionTokenField;
+    private JTextField manualSymbolField;
+    private JTextField manualQuantityField;
+    private JTextField manualDataField;
 
     public TradingFrame(ServerConnection connection, String sessionToken, String username) {
         this.connection = connection;
@@ -50,6 +54,16 @@ public class TradingFrame extends JFrame {
         JButton refreshButton = new JButton("Refresh");
         refreshButton.addActionListener(e -> refreshData());
         topPanel.add(refreshButton);
+
+        topPanel.add(new JLabel("Session Token:"));
+        sessionTokenField = new JTextField(sessionToken, 32);
+        sessionTokenField.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        sessionTokenField.setPreferredSize(new Dimension(280, 24));
+        topPanel.add(sessionTokenField);
+
+        JButton applyTokenButton = new JButton("Use Token");
+        applyTokenButton.addActionListener(e -> overrideSessionToken());
+        topPanel.add(applyTokenButton);
 
         mainPanel.add(topPanel, BorderLayout.NORTH);
 
@@ -108,6 +122,31 @@ public class TradingFrame extends JFrame {
 
         mainPanel.add(splitPane, BorderLayout.CENTER);
 
+        JPanel devPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        devPanel.setBorder(BorderFactory.createTitledBorder("Dev Tools"));
+
+        devPanel.add(new JLabel("Symbol:"));
+        manualSymbolField = new JTextField(8);
+        devPanel.add(manualSymbolField);
+
+        devPanel.add(new JLabel("Qty:"));
+        manualQuantityField = new JTextField("-100", 8);
+        devPanel.add(manualQuantityField);
+
+        devPanel.add(new JLabel("Buy data:"));
+        manualDataField = new JTextField(12);
+        devPanel.add(manualDataField);
+
+        JButton manualBuyButton = new JButton("Send Buy");
+        manualBuyButton.addActionListener(e -> performManualBuy());
+        devPanel.add(manualBuyButton);
+
+        JButton manualSellButton = new JButton("Send Sell");
+        manualSellButton.addActionListener(e -> performManualSell());
+        devPanel.add(manualSellButton);
+
+        mainPanel.add(devPanel, BorderLayout.SOUTH);
+
         add(mainPanel);
     }
 
@@ -120,7 +159,7 @@ public class TradingFrame extends JFrame {
     private void refreshBalance() {
         try {
             GetBalanceRequest request = new GetBalanceRequest();
-            request.setSessionToken(sessionToken);
+            request.setSessionToken(resolveSessionToken());
             Response response = connection.sendRequest(request);
 
             if (response.isSuccess()) {
@@ -140,7 +179,7 @@ public class TradingFrame extends JFrame {
     private void refreshStocks() {
         try {
             GetStocksRequest request = new GetStocksRequest();
-            request.setSessionToken(sessionToken);
+            request.setSessionToken(resolveSessionToken());
             Response response = connection.sendRequest(request);
 
             if (response.isSuccess()) {
@@ -164,11 +203,11 @@ public class TradingFrame extends JFrame {
     private void refreshPortfolio() {
         try {
             GetPortfolioRequest portfolioRequest = new GetPortfolioRequest();
-            portfolioRequest.setSessionToken(sessionToken);
+            portfolioRequest.setSessionToken(resolveSessionToken());
             Response portfolioResponse = connection.sendRequest(portfolioRequest);
 
             GetStocksRequest stocksRequest = new GetStocksRequest();
-            stocksRequest.setSessionToken(sessionToken);
+            stocksRequest.setSessionToken(resolveSessionToken());
             Response stocksResponse = connection.sendRequest(stocksRequest);
 
             if (portfolioResponse.isSuccess() && stocksResponse.isSuccess()) {
@@ -230,7 +269,7 @@ public class TradingFrame extends JFrame {
             }
 
             BuyRequest request = new BuyRequest(symbol, quantity);
-            request.setSessionToken(sessionToken);
+            request.setSessionToken(resolveSessionToken());
             Response response = connection.sendRequest(request);
 
             if (response.isSuccess()) {
@@ -280,7 +319,7 @@ public class TradingFrame extends JFrame {
             }
 
             SellRequest request = new SellRequest(symbol, quantity);
-            request.setSessionToken(sessionToken);
+            request.setSessionToken(resolveSessionToken());
             Response response = connection.sendRequest(request);
 
             if (response.isSuccess()) {
@@ -301,5 +340,120 @@ public class TradingFrame extends JFrame {
             e.printStackTrace();
         }
     }
-}
 
+    private void overrideSessionToken() {
+        String candidate = sessionTokenField.getText().trim();
+        if (candidate.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Session token cannot be empty",
+                "Error", JOptionPane.ERROR_MESSAGE);
+            sessionTokenField.setText(sessionToken);
+            return;
+        }
+
+        sessionToken = candidate;
+        JOptionPane.showMessageDialog(this, "Session token updated.",
+            "Info", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private String resolveSessionToken() {
+        if (sessionTokenField != null) {
+            String fromField = sessionTokenField.getText().trim();
+            if (!fromField.isEmpty() && !fromField.equals(sessionToken)) {
+                sessionToken = fromField;
+            }
+        }
+        return sessionToken;
+    }
+
+    private void performManualBuy() {
+        String symbol = manualSymbolField.getText().trim();
+        if (symbol.isEmpty()) {
+            int selectedRow = stocksTable.getSelectedRow();
+            if (selectedRow != -1) {
+                symbol = (String) stocksTableModel.getValueAt(selectedRow, 0);
+                manualSymbolField.setText(symbol);
+            }
+        }
+
+        if (symbol.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enter a symbol or select a stock first",
+                "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        String quantityStr = manualQuantityField.getText().trim();
+        if (quantityStr.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enter a quantity (negative allowed)",
+                "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        try {
+            int quantity = Integer.parseInt(quantityStr);
+            BuyRequest request = new BuyRequest(symbol, quantity);
+            String data = manualDataField.getText().trim();
+            if (!data.isEmpty()) {
+                request.setData(data);
+            }
+            request.setSessionToken(resolveSessionToken());
+            Response response = connection.sendRequest(request);
+
+            JOptionPane.showMessageDialog(this,
+                "Buy response: " + response.getMessage(),
+                response.isSuccess() ? "Success" : "Error",
+                response.isSuccess() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
+            refreshData();
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Quantity must be an integer",
+                "Error", JOptionPane.ERROR_MESSAGE);
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Error: " + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+        }
+    }
+
+    private void performManualSell() {
+        String symbol = manualSymbolField.getText().trim();
+        if (symbol.isEmpty()) {
+            int selectedRow = portfolioTable.getSelectedRow();
+            if (selectedRow != -1) {
+                symbol = (String) portfolioTableModel.getValueAt(selectedRow, 0);
+                manualSymbolField.setText(symbol);
+            }
+        }
+
+        if (symbol.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enter a symbol or select from portfolio",
+                "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        String quantityStr = manualQuantityField.getText().trim();
+        if (quantityStr.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enter a quantity",
+                "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        try {
+            int quantity = Integer.parseInt(quantityStr);
+            SellRequest request = new SellRequest(symbol, quantity);
+            request.setSessionToken(resolveSessionToken());
+            Response response = connection.sendRequest(request);
+
+            JOptionPane.showMessageDialog(this,
+                "Sell response: " + response.getMessage(),
+                response.isSuccess() ? "Success" : "Error",
+                response.isSuccess() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
+            refreshData();
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Quantity must be an integer",
+                "Error", JOptionPane.ERROR_MESSAGE);
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Error: " + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+        }
+    }
+}
