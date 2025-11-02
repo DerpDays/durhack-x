@@ -4,14 +4,21 @@
     <meta charset="utf-8" />
     <title>Bridging Worlds – Virtual Farm</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
     <style>
       html, body {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        font-family: 'Inter', system-ui, sans-serif;
+        font-family: 'Press Start 2P', monospace;
         background: radial-gradient(circle at 20% 20%, #101b2d, #050910);
         color: #f6f8fa;
+        letter-spacing: 0.5px;
       }
       #scene {
         width: 100vw;
@@ -22,40 +29,46 @@
         position: absolute;
         top: 16px;
         left: 16px;
-        padding: 12px 16px;
-        background: rgba(13, 17, 23, 0.85);
-        border-radius: 12px;
-        backdrop-filter: blur(6px);
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
-        max-width: 360px;
+        padding: 10px 14px;
+        background: rgba(13, 17, 23, 0.9);
+        border-radius: 4px;
+        border: 3px solid #2c3a4c;
+        box-shadow: inset 0 0 0 2px #596b7d, 0 10px 24px rgba(0, 0, 0, 0.45);
+        max-width: 260px;
+        image-rendering: pixelated;
       }
       #hud h1 {
-        margin: 0 0 8px;
-        font-size: 20px;
-        font-weight: 600;
+        margin: 0 0 6px;
+        font-size: 14px;
+        text-transform: uppercase;
       }
       #hud p {
         margin: 4px 0;
-        font-size: 14px;
-        line-height: 1.4;
+        font-size: 10px;
+        line-height: 1.5;
         white-space: pre-line;
       }
       .btn {
-        margin-top: 8px;
-        padding: 8px 12px;
-        background: #238636;
-        border: none;
-        border-radius: 8px;
+        margin-top: 6px;
+        padding: 6px 8px;
+        background: #1b7a30;
+        border: 3px solid #0f3f19;
+        border-radius: 3px;
         color: #fff;
-        font-weight: 600;
         cursor: pointer;
+        box-shadow: inset -4px -4px 0 #0c2c12;
+        text-transform: uppercase;
+        font-size: 10px;
       }
       .btn:disabled {
-        background: #30363d;
+        background: #2a2d34;
         cursor: not-allowed;
+        box-shadow: inset -4px -4px 0 #1c1e24;
       }
       #shop-btn {
-        background: #8957e5;
+        background: #5533a8;
+        border-color: #2b1a58;
+        box-shadow: inset -4px -4px 0 #1c0f3a;
       }
       #lock-overlay {
         position: absolute;
@@ -73,27 +86,29 @@
         opacity: 0;
       }
       #lock-overlay button {
-        font-size: 18px;
-        padding: 12px 24px;
-        border-radius: 12px;
-        border: none;
-        background: linear-gradient(135deg, #238636, #2ea043);
+        font-size: 14px;
+        padding: 14px 28px;
+        border-radius: 4px;
+        border: 4px solid #0f3f19;
+        background: #1b7a30;
         color: white;
         cursor: pointer;
-        font-weight: 700;
+        box-shadow: inset -4px -4px 0 #0c2c12;
       }
       #toast {
         position: absolute;
         bottom: 24px;
         right: 24px;
-        background: rgba(13, 17, 23, 0.85);
-        border-radius: 10px;
-        padding: 12px 16px;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+        background: rgba(13, 17, 23, 0.92);
+        border-radius: 6px;
+        border: 4px solid #2c3a4c;
+        padding: 14px 18px;
+        box-shadow: inset 0 0 0 2px #596b7d, 0 10px 24px rgba(0,0,0,0.45);
         opacity: 0;
         transform: translateY(20px);
         transition: opacity 0.3s ease, transform 0.3s ease;
         pointer-events: none;
+        min-width: 240px;
       }
       #toast.visible {
         opacity: 1;
@@ -125,36 +140,39 @@
         position: absolute;
         right: 24px;
         top: 24px;
-        width: 320px;
-        padding: 18px;
-        border-radius: 14px;
-        background: rgba(8, 11, 18, 0.94);
-        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-        backdrop-filter: blur(10px);
+        width: 360px;
+        padding: 20px;
+        border-radius: 6px;
+        background: rgba(10, 13, 20, 0.95);
+        border: 4px solid #403225;
+        box-shadow: inset 0 0 0 2px #7a6141, 0 12px 40px rgba(0, 0, 0, 0.55);
         display: none;
         flex-direction: column;
         gap: 12px;
+        image-rendering: pixelated;
       }
       #shop-panel.visible {
         display: flex;
       }
       #shop-panel h2 {
         margin: 0;
-        font-size: 18px;
+        font-size: 16px;
+        text-transform: uppercase;
       }
       #shop-panel label {
-        font-size: 13px;
+        font-size: 11px;
         opacity: 0.8;
       }
       #shop-panel textarea,
       #shop-panel input {
         width: 100%;
         border-radius: 8px;
-        border: 1px solid rgba(118, 141, 187, 0.4);
-        background: rgba(17, 24, 39, 0.8);
+        border: 4px solid #2c3a4c;
+        background: rgba(17, 24, 39, 0.95);
         color: #f8fafc;
         padding: 8px 10px;
-        font-family: 'Source Code Pro', monospace;
+        font-family: 'Press Start 2P', monospace;
+        font-size: 11px;
       }
       #shop-panel textarea {
         min-height: 90px;
@@ -167,16 +185,32 @@
       }
       .panel-btn {
         flex: 1 1 calc(50% - 8px);
-        background: #238636;
+        background: #1b7a30;
         color: #fff;
-        border: none;
-        padding: 8px 10px;
-        border-radius: 8px;
-        font-weight: 600;
+        border: 4px solid #0f3f19;
+        padding: 10px 8px;
+        border-radius: 4px;
         cursor: pointer;
+        box-shadow: inset -4px -4px 0 #0c2c12;
+        text-transform: uppercase;
       }
       .panel-btn.secondary {
         background: #30363d;
+        border-color: #202225;
+        box-shadow: inset -4px -4px 0 #16171a;
+      }
+      .panel-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .inline-input {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .inline-input input {
+        flex: 1;
       }
     </style>
   </head>
@@ -199,10 +233,19 @@
     <div id="shop-panel">
       <h2>Compute Coop</h2>
       <p id="shop-info">Syncing…</p>
-      <label for="script-input">Plant a script workload (JS snippet returning a number)</label>
-      <textarea id="script-input" placeholder="print(5 + 6)"></textarea>
-      <label for="bounty-input">Reward (tokens)</label>
-      <input id="bounty-input" type="number" min="0" max="10" step="1" value="1" />
+      <div class="panel-section">
+        <label for="script-input">Plant a script workload (JS snippet returning a number)</label>
+        <textarea id="script-input" placeholder="print(5 + 6)"></textarea>
+        <label for="bounty-input">Reward (tokens)</label>
+        <input id="bounty-input" type="number" min="0" max="10" step="1" value="1" />
+      </div>
+      <div class="panel-section">
+        <label for="api-input">Coordinator URL</label>
+        <div class="inline-input">
+          <input id="api-input" type="text" placeholder="http://127.0.0.1:8080" />
+          <button id="connect-btn" class="panel-btn secondary" style="flex:0 0 auto;">Connect</button>
+        </div>
+      </div>
       <div id="shop-panel-actions">
         <button id="plant-btn" class="panel-btn">Plant Script Task</button>
         <button id="seed-classic" class="panel-btn secondary">Grow Classic Tasks</button>

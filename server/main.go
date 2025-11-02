@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
@@ -18,7 +20,7 @@ import (
 
 type Task struct {
 	ID                   string          `json:"id"`
-	Operation            uint8           `json:"operation"`
+	Operation            string          `json:"operation"`
 	Input                float64         `json:"input"`
 	Price                int64           `json:"price"`
 	Kind                 string          `json:"kind"`
@@ -38,7 +40,7 @@ type ResultData struct {
 
 type TaskOverview struct {
 	ID                   string          `json:"id"`
-	Operation            uint8           `json:"operation"`
+	Operation            string          `json:"operation"`
 	Kind                 string          `json:"kind"`
 	Price                int64           `json:"price"`
 	AssignedTo           *string         `json:"assigned_to,omitempty"`
@@ -60,7 +62,104 @@ type Worker struct {
 var db *sql.DB
 var mu sync.Mutex // protects SQLite access
 
+type mortalityCoefficients struct {
+	Intercept float64
+	Age       float64
+	AgeSq     float64
+	City      map[string]float64
+	Country   map[string]float64
+	Ethnicity map[string]float64
+	CauseMap  map[string]string
+}
+
+var mortalityModel = defaultMortalityModel()
+
+func defaultMortalityModel() mortalityCoefficients {
+	return mortalityCoefficients{
+		Intercept: -6.35,
+		Age:       0.072,
+		AgeSq:     -0.00028,
+		City: map[string]float64{
+			"new york":    0.48,
+			"los angeles": 0.32,
+			"mumbai":      0.55,
+			"delhi":       0.58,
+			"tokyo":       -0.42,
+			"osaka":       -0.35,
+			"london":      0.12,
+			"lagos":       0.61,
+			"jakarta":     0.44,
+			"sydney":      -0.28,
+		},
+		Country: map[string]float64{
+			"united states":  0.32,
+			"india":          0.41,
+			"nigeria":        0.63,
+			"indonesia":      0.47,
+			"japan":          -0.48,
+			"australia":      -0.36,
+			"united kingdom": 0.18,
+			"canada":         -0.22,
+			"germany":        -0.19,
+			"brazil":         0.29,
+		},
+		Ethnicity: map[string]float64{
+			"smoker":       0.58,
+			"diabetes":     0.46,
+			"hypertension": 0.37,
+			"athlete":      -0.32,
+			"vegan":        -0.21,
+		},
+		CauseMap: map[string]string{
+			"smoker":       "Respiratory failure from chronic exposure to toxins.",
+			"diabetes":     "Organ failure due to uncontrolled diabetes.",
+			"hypertension": "Hypertensive crisis leading to stroke.",
+			"mumbai":       "Vector-borne disease outbreak in dense urban settlement.",
+			"delhi":        "Air-quality driven respiratory collapse.",
+			"lagos":        "Water-borne infection during seasonal floods.",
+			"tokyo":        "Peaceful passing in a low-risk environment.",
+			"japan":        "Natural causes after an extended life expectancy.",
+			"default":      "Systemic infection following prolonged stress.",
+		},
+	}
+}
+
+func loadMortalityModel(path string) mortalityCoefficients {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("using default mortality model (could not read %s: %v)", path, err)
+		return defaultMortalityModel()
+	}
+	var model mortalityCoefficients
+	if err := json.Unmarshal(data, &model); err != nil {
+		log.Printf("using default mortality model (could not parse %s: %v)", path, err)
+		return defaultMortalityModel()
+	}
+	if model.City == nil {
+		model.City = map[string]float64{}
+	}
+	if model.Country == nil {
+		model.Country = map[string]float64{}
+	}
+	if model.Ethnicity == nil {
+		model.Ethnicity = map[string]float64{}
+	}
+	if model.CauseMap == nil {
+		model.CauseMap = map[string]string{}
+	}
+	return model
+}
+
 func main() {
+	addr := os.Getenv("COORDINATOR_ADDR")
+	if addr == "" {
+		addr = ":8081"
+	}
+	modelPath := os.Getenv("MORTALITY_MODEL_PATH")
+	if modelPath == "" {
+		modelPath = "data/mortality_model.json"
+	}
+	mortalityModel = loadMortalityModel(modelPath)
 	var err error
 	db, err = sql.Open("sqlite3", "./coordinator_v4.db")
 	if err != nil {
@@ -72,17 +171,38 @@ func main() {
 	}
 
 	router := mux.NewRouter()
-	router.HandleFunc("/register", RegisterWorker).Methods("POST")
-	router.HandleFunc("/get_task", GetTask).Methods("GET")
-	router.HandleFunc("/submit_result", SubmitResult).Methods("POST")
-	router.HandleFunc("/balance", GetBalance).Methods("GET")
-	router.HandleFunc("/generate_tasks", GenerateTasks).Methods("POST")
-	router.HandleFunc("/tasks_overview", TasksOverview).Methods("GET")
-	router.HandleFunc("/create_task", CreateTask).Methods("POST")
 	router.Use(corsMiddleware)
+	router.Methods(http.MethodOptions).HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 
-	log.Println("Coordinator v4 running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	router.HandleFunc("/register", RegisterWorker).Methods(http.MethodPost)
+	router.HandleFunc("/register", optionsHandler).Methods(http.MethodOptions)
+
+	router.HandleFunc("/get_task", GetTask).Methods(http.MethodGet)
+	router.HandleFunc("/get_task", optionsHandler).Methods(http.MethodOptions)
+
+	router.HandleFunc("/submit_result", SubmitResult).Methods(http.MethodPost)
+	router.HandleFunc("/submit_result", optionsHandler).Methods(http.MethodOptions)
+
+	router.HandleFunc("/balance", GetBalance).Methods(http.MethodGet)
+	router.HandleFunc("/balance", optionsHandler).Methods(http.MethodOptions)
+
+	router.HandleFunc("/generate_tasks", GenerateTasks).Methods(http.MethodPost)
+	router.HandleFunc("/generate_tasks", optionsHandler).Methods(http.MethodOptions)
+
+	router.HandleFunc("/tasks_overview", TasksOverview).Methods(http.MethodGet)
+	router.HandleFunc("/tasks_overview", optionsHandler).Methods(http.MethodOptions)
+
+	router.HandleFunc("/create_task", CreateTask).Methods(http.MethodPost)
+	router.HandleFunc("/create_task", optionsHandler).Methods(http.MethodOptions)
+	router.HandleFunc("/seer/predict", SeerPredict).Methods(http.MethodPost)
+	router.HandleFunc("/seer/predict", optionsHandler).Methods(http.MethodOptions)
+	router.HandleFunc("/seer/model", SeerModel).Methods(http.MethodGet)
+	router.HandleFunc("/seer/model", optionsHandler).Methods(http.MethodOptions)
+
+	log.Printf("Coordinator v4 running on %s\n", addr)
+	log.Fatal(http.ListenAndServe(addr, router))
 }
 
 // ---------------- Worker registration ----------------
@@ -288,7 +408,7 @@ func GenerateTasks(w http.ResponseWriter, r *http.Request) {
 
 func CreateTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Operation            uint8           `json:"operation"`
+		Operation            string          `json:"operation"`
 		Input                float64         `json:"input"`
 		Price                int64           `json:"price"`
 		Kind                 string          `json:"kind"`
@@ -402,6 +522,9 @@ func RandomString(n int) string {
 }
 
 func ensureSchema(db *sql.DB) error {
+	if err := migrateTasksTable(db); err != nil {
+		return err
+	}
 	createStatements := []string{
 		`CREATE TABLE IF NOT EXISTS workers (
 			worker_id TEXT PRIMARY KEY,
@@ -411,10 +534,10 @@ func ensureSchema(db *sql.DB) error {
 			capabilities TEXT DEFAULT '[]'
 		);`,
 		`CREATE TABLE IF NOT EXISTS tasks (
-			id TEXT PRIMARY KEY,
-			operation INTEGER NOT NULL,
-			input REAL NOT NULL,
-			price INTEGER NOT NULL,
+            id TEXT PRIMARY KEY,
+            operation TEXT NOT NULL,
+            input REAL NOT NULL,
+            price INTEGER NOT NULL,
 			assigned_to TEXT,
 			completed INTEGER DEFAULT 0,
 			verified INTEGER DEFAULT 0,
@@ -460,6 +583,45 @@ func ensureSchema(db *sql.DB) error {
 	return nil
 }
 
+func migrateTasksTable(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(tasks)`)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return nil
+		}
+		return err
+	}
+	defer rows.Close()
+
+	type info struct {
+		cid     int
+		name    string
+		ctype   string
+		notnull int
+		dflt    interface{}
+		pk      int
+	}
+	needDrop := false
+	for rows.Next() {
+		var column info
+		if err := rows.Scan(&column.cid, &column.name, &column.ctype, &column.notnull, &column.dflt, &column.pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(column.name, "operation") && !strings.HasPrefix(strings.ToUpper(column.ctype), "TEXT") {
+			needDrop = true
+		}
+	}
+	if needDrop {
+		if _, err := db.Exec(`DROP TABLE IF EXISTS results`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`DROP TABLE IF EXISTS tasks`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func loadWorkerCapabilities(workerID string) ([]string, error) {
 	var capsJSON sql.NullString
 	err := db.QueryRow("SELECT capabilities FROM workers WHERE worker_id=?", workerID).Scan(&capsJSON)
@@ -473,6 +635,121 @@ func loadWorkerCapabilities(workerID string) ([]string, error) {
 		return []string{}, nil
 	}
 	return parseCapabilityJSON(capsJSON.String), nil
+}
+
+// ---------------- Seer prediction ----------------
+func SeerPredict(w http.ResponseWriter, r *http.Request) {
+	type payload struct {
+		Age       float64 `json:"age"`
+		City      string  `json:"city"`
+		Country   string  `json:"country"`
+		Ethnicity string  `json:"ethnicity"`
+	}
+	type response struct {
+		Prediction     string  `json:"prediction"`
+		YearsRemaining int     `json:"yearsRemaining"`
+		RiskScore      float64 `json:"riskScore"`
+		Advisory       string  `json:"advisory"`
+		Reason         string  `json:"reason"`
+	}
+
+	var body payload
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	risk, cause := runMortalityModel(body.Age, body.City, body.Country, body.Ethnicity)
+	yearsRemaining := int(math.Max(5, 95.0-body.Age-(risk*12)))
+	prediction := "The threads favour a long life."
+	advisory := "Share compute wisely; benevolence extends longevity."
+	if risk > 0.65 {
+		prediction = "A storm gathers sooner than expected."
+		advisory = "Course-correct habits, seek preventative care, and lean on community trust."
+	} else if risk > 0.45 {
+		prediction = "Fate balances on a knife-edge."
+		advisory = "Moderate stressors and nurture trusted alliances to improve the odds."
+	}
+
+	resp := response{
+		Prediction:     prediction,
+		YearsRemaining: yearsRemaining,
+		RiskScore:      risk,
+		Advisory:       advisory,
+		Reason:         cause,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func SeerModel(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(mortalityModel)
+}
+
+func runMortalityModel(age float64, city, country, ethnicity string) (float64, string) {
+	score := mortalityModel.Intercept + mortalityModel.Age*age + mortalityModel.AgeSq*age*age
+	contributions := map[string]float64{}
+
+	lowerCity := strings.ToLower(strings.TrimSpace(city))
+	if val, ok := mortalityModel.City[lowerCity]; ok {
+		score += val
+		contributions[lowerCity] = val
+	}
+
+	lowerCountry := strings.ToLower(strings.TrimSpace(country))
+	if val, ok := mortalityModel.Country[lowerCountry]; ok {
+		score += val
+		contributions[lowerCountry] = val
+	}
+
+	lowerEthnicity := strings.ToLower(strings.TrimSpace(ethnicity))
+	for key, coef := range mortalityModel.Ethnicity {
+		if strings.Contains(lowerEthnicity, key) {
+			score += coef
+			contributions[key] = coef
+		}
+	}
+
+	risk := clamp01(sigmoid(score))
+	causeKey := selectCause(contributions)
+	cause := mortalityModel.CauseMap[causeKey]
+	if cause == "" {
+		cause = mortalityModel.CauseMap["default"]
+	}
+	return risk, cause
+}
+
+func selectCause(contrib map[string]float64) string {
+	maxKey := ""
+	maxVal := 0.0
+	for key, val := range contrib {
+		if val > maxVal {
+			maxVal = val
+			maxKey = key
+		}
+	}
+	if maxKey == "" {
+		return "default"
+	}
+	if _, ok := mortalityModel.CauseMap[maxKey]; ok {
+		return maxKey
+	}
+	return "default"
+}
+
+func sigmoid(x float64) float64 {
+	return 1 / (1 + math.Exp(-x))
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 func parseCapabilityJSON(raw string) []string {
@@ -531,4 +808,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func optionsHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }

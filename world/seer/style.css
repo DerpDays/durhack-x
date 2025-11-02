@@ -1,0 +1,287 @@
+@import url('https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  color-scheme: dark;
+  --bg: radial-gradient(circle at top, #1c1125, #05060d 45%);
+  --card-bg: rgba(18, 20, 34, 0.85);
+  --accent: #9d5cff;
+  --accent-soft: rgba(157, 92, 255, 0.25);
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #edf2ff;
+  --muted: #c9ccdd;
+  --danger: #ff718d;
+  --success: #6af7c7;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  display: flex;
+  justify-content: center;
+  padding: 32px 16px 48px;
+}
+
+main {
+  max-width: 1100px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.hero {
+  text-align: center;
+  background: rgba(7, 9, 18, 0.6);
+  border: 1px solid rgba(157, 92, 255, 0.3);
+  border-radius: 18px;
+  padding: 24px 28px;
+  box-shadow: 0 18px 54px rgba(30, 9, 51, 0.45);
+  backdrop-filter: blur(20px);
+}
+
+.hero h1 {
+  font-family: 'IM Fell English SC', serif;
+  margin: 0;
+  font-size: clamp(2.4rem, 5vw, 3.4rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.hero p {
+  margin: 12px auto 22px;
+  max-width: 640px;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.api-control {
+  display: grid;
+  grid-template-columns: 140px minmax(160px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  justify-items: center;
+  font-size: 0.95rem;
+}
+
+.api-control label {
+  justify-self: end;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.api-control input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.api-control button {
+  padding: 10px 20px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #845bff, #6a3bff);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.api-control button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(106, 59, 255, 0.35);
+}
+
+.api-control .status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 28px;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 22px 24px 26px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top, var(--accent-soft), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.card:hover::before {
+  opacity: 1;
+}
+
+.card h2 {
+  font-family: 'IM Fell English SC', serif;
+  margin: 0 0 12px;
+  font-size: 1.6rem;
+  color: #d3c7ff;
+  letter-spacing: 0.05em;
+}
+
+.card p {
+  color: var(--muted);
+  margin: 0 0 16px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.card form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #c7cbe3;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.card input,
+.card textarea {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(4, 6, 14, 0.6);
+  color: var(--text);
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.card button {
+  margin-top: 4px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: none;
+  background: linear-gradient(135deg, #ff8a7a, #ff477e);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 35px rgba(255, 71, 126, 0.3);
+}
+
+.result {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(10, 12, 22, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  min-height: 40px;
+}
+
+.result p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.result .highlight {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.result .warning {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.result.muted {
+  font-style: italic;
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(12, 16, 30, 0.92);
+  border: 1px solid rgba(157, 92, 255, 0.35);
+  color: #f5f5ff;
+  padding: 12px 18px;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+  font-size: 0.9rem;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.error {
+  border-color: rgba(255, 113, 141, 0.5);
+  color: #ffb8c6;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  body {
+    padding: 24px 12px 36px;
+  }
+
+  .cards {
+    grid-template-columns: 1fr;
+  }
+
+  .api-control {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+    gap: 10px;
+  }
+
+  .api-control label {
+    justify-self: start;
+  }
+}

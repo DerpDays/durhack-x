@@ -1,19 +1,130 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import nacl from 'https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/+esm';
 
+const PixelShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    resolution: { value: new THREE.Vector2(256, 256) },
+    pixelSize: { value: 1.5 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform vec2 resolution;
+    uniform float pixelSize;
+    varying vec2 vUv;
+
+    void main() {
+      vec2 dxy = pixelSize / resolution;
+      vec2 coord = dxy * floor( vUv / dxy ) + dxy * 0.5;
+      gl_FragColor = texture2D( tDiffuse, coord );
+    }
+  `,
+};
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 const inferredBase = window.location.hostname
   ? `${window.location.protocol}//${window.location.hostname}:8080`
   : 'http://127.0.0.1:8080';
-const API_BASE = window.__FARM_CONFIG?.apiBase ?? inferredBase;
+const storedApiBase = localStorage.getItem('virtual_farm_api_base');
+let apiBase = window.__FARM_CONFIG?.apiBase ?? inferredBase;
+if (storedApiBase) {
+  apiBase = storedApiBase;
+}
 const WORKER_ID = window.__FARM_CONFIG?.workerId ?? 'virtual-presenter';
 const CAPABILITIES = ['math:basic', 'math:advanced', 'analytics:vector', 'script:sandbox'];
-
 const MOVE_SPEED = 4.5;
 const INTERACTION_RADIUS = 1.6;
 const REFRESH_INTERVAL_MS = 5_000;
 const PLAYER_HEIGHT = 1.2;
 
+const pixelTextures = {};
+
+function makeCheckerTexture(key, colorA, colorB, size = 32, scale = 4) {
+  if (pixelTextures[key]) return pixelTextures[key];
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cell = size / scale;
+  for (let y = 0; y < scale; y += 1) {
+    for (let x = 0; x < scale; x += 1) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? colorA : colorB;
+      ctx.fillRect(x * cell, y * cell, cell, cell);
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  pixelTextures[key] = texture;
+  return texture;
+}
+
+function makeStripTexture(key, colorA, colorB, size = 32, scale = 4) {
+  if (pixelTextures[key]) return pixelTextures[key];
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cell = size / scale;
+  for (let y = 0; y < scale; y += 1) {
+    ctx.fillStyle = y % 2 === 0 ? colorA : colorB;
+    ctx.fillRect(0, y * cell, size, cell);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  pixelTextures[key] = texture;
+  return texture;
+}
+
+function createBlockMaterials({ top, bottom, side }) {
+  const topTex = top.clone ? top.clone() : top;
+  const bottomTex = bottom.clone ? bottom.clone() : bottom;
+  const sideTex = side.clone ? side.clone() : side;
+  [topTex, bottomTex, sideTex].forEach((tex) => {
+    if (!tex) return;
+    tex.needsUpdate = true;
+    if (tex.repeat) tex.repeat.set(1, 1);
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  });
+  const topMat = new THREE.MeshStandardMaterial({
+    map: topTex,
+    roughness: 0.5,
+    metalness: 0.0,
+  });
+  const bottomMat = new THREE.MeshStandardMaterial({
+    map: bottomTex,
+    roughness: 0.6,
+    metalness: 0.0,
+  });
+  const sideMat = new THREE.MeshStandardMaterial({
+    map: sideTex,
+    roughness: 0.55,
+    metalness: 0.0,
+  });
+  return [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
+}
+
+// ---------------------------------------------------------------------------
+// DOM hooks
+// ---------------------------------------------------------------------------
 const canvas = document.getElementById('scene');
 const statusEl = document.getElementById('status');
 const balanceEl = document.getElementById('balance');
@@ -28,21 +139,41 @@ const shopPanel = document.getElementById('shop-panel');
 const shopInfo = document.getElementById('shop-info');
 const scriptInput = document.getElementById('script-input');
 const bountyInput = document.getElementById('bounty-input');
+const apiInput = document.getElementById('api-input');
+const connectBtn = document.getElementById('connect-btn');
 const plantBtn = document.getElementById('plant-btn');
 const seedClassicBtn = document.getElementById('seed-classic');
 const closePanelBtn = document.getElementById('close-panel');
 shopBtn.dataset.mode = 'balance';
 
+if (apiInput) {
+  apiInput.value = apiBase;
+}
+
+// ---------------------------------------------------------------------------
+// Scene bootstrap
+// ---------------------------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(window.devicePixelRatio > 1 ? 1.5 : 1);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.autoClear = false;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b1a2f);
+const daySkyColor = new THREE.Color(0x1b3d6d);
+const nightSkyColor = new THREE.Color(0x050910);
+scene.background = nightSkyColor.clone();
 
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 200);
 camera.position.set(0, PLAYER_HEIGHT, 5);
+
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+const pixelPass = new ShaderPass(PixelShader);
+pixelPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+pixelPass.uniforms.pixelSize.value = 2.0;
+composer.addPass(pixelPass);
 
 const controls = new PointerLockControls(camera, renderer.domElement);
 scene.add(controls.getObject());
@@ -60,8 +191,20 @@ const sun = new THREE.DirectionalLight(0xd4f0ff, 0.85);
 sun.position.set(8, 12, 10);
 scene.add(sun);
 
+const grassTopTex = makeCheckerTexture('grassTop', '#4caf4f', '#3a8c3b');
+const grassSideTex = makeStripTexture('grassSide', '#3f7f35', '#2c5a24');
+const dirtTex = makeCheckerTexture('dirt', '#7a4a29', '#60371d');
+const pathTex = makeStripTexture('path', '#6d5438', '#5a452d');
+const waterTex = makeCheckerTexture('water', '#3c7bd6', '#2b5ea3', 32, 8);
+const verifiedTopTex = makeCheckerTexture('verifiedTop', '#2fcd7c', '#26a965');
+const pendingTopTex = makeCheckerTexture('pendingTop', '#f4c542', '#dba32c');
+const scriptTopTex = makeCheckerTexture('scriptTop', '#5a9ee6', '#4a81c2');
+const coopTopTex = makeCheckerTexture('coopTop', '#8c5cf4', '#6b43d0');
+const coopSideTex = makeCheckerTexture('coopSide', '#41276f', '#2e184e');
+
 const groundGeo = new THREE.CircleGeometry(40, 64);
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x134626 });
+grassTopTex.repeat.set(48, 48);
+const groundMat = new THREE.MeshStandardMaterial({ map: grassTopTex, roughness: 0.85, metalness: 0 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
@@ -69,7 +212,7 @@ scene.add(ground);
 
 const path = new THREE.Mesh(
   new THREE.PlaneGeometry(4, 18),
-  new THREE.MeshStandardMaterial({ color: 0x2d1f14 })
+  new THREE.MeshStandardMaterial({ map: pathTex, roughness: 0.9, metalness: 0 })
 );
 path.rotation.x = -Math.PI / 2;
 path.position.set(0, 0.01, -2);
@@ -95,6 +238,9 @@ scene.add(shop);
 
 buildFarmDecor();
 
+// ---------------------------------------------------------------------------
+// Game state
+// ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
 const keyState = { forward: false, backward: false, left: false, right: false };
 
@@ -102,13 +248,18 @@ let focusTarget = null;
 let taskLookup = new Map();
 let latestTasks = [];
 let refreshTimer = null;
+let dayTimer = Math.random() * Math.PI * 2;
 
 const encoder = new TextEncoder();
 const keyPair = loadOrCreateKeyPair();
+let pendingShopUnlock = false;
 
+// ---------------------------------------------------------------------------
+// Coordinator integration
+// ---------------------------------------------------------------------------
 async function ensureRegistration() {
   try {
-    const res = await fetch(`${API_BASE}/register`, {
+    const res = await fetch(`${apiBase}/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -131,20 +282,29 @@ async function ensureRegistration() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Scene builders & ambience
+// ---------------------------------------------------------------------------
 function buildShop() {
   const group = new THREE.Group();
   group.position.set(-6, 0, -4);
 
   const base = new THREE.Mesh(
     new THREE.BoxGeometry(2.2, 1.4, 2.2),
-    new THREE.MeshStandardMaterial({ color: 0x3c1d72, emissive: 0x33155e, emissiveIntensity: 0.5 })
+    createBlockMaterials({ top: coopTopTex, bottom: dirtTex, side: coopSideTex })
   );
   base.position.y = 0.7;
   group.add(base);
 
   const roof = new THREE.Mesh(
     new THREE.ConeGeometry(1.8, 1.4, 4),
-    new THREE.MeshStandardMaterial({ color: 0x5a2fb1, emissive: 0x421b85, emissiveIntensity: 0.6 })
+    new THREE.MeshStandardMaterial({
+      map: coopSideTex.clone(),
+      roughness: 0.5,
+      metalness: 0.0,
+      emissive: new THREE.Color(0x2a1554),
+      emissiveIntensity: 0.4,
+    })
   );
   roof.position.y = 1.7;
   roof.rotation.y = Math.PI / 4;
@@ -203,8 +363,15 @@ function buildFarmDecor() {
 
   const pond = new THREE.Mesh(
     new THREE.CircleGeometry(2.4, 32),
-    new THREE.MeshStandardMaterial({ color: 0x3d8bcb, transparent: true, opacity: 0.75 })
+    new THREE.MeshStandardMaterial({
+      map: waterTex,
+      transparent: true,
+      opacity: 0.85,
+      roughness: 0.2,
+      metalness: 0.1,
+    })
   );
+  waterTex.repeat.set(2, 2);
   pond.rotation.x = -Math.PI / 2;
   pond.position.set(-4, 0.02, 6);
   decorGroup.add(pond);
@@ -215,6 +382,33 @@ function buildFarmDecor() {
   );
   duck.position.set(-4, 0.35, 6.4);
   decorGroup.add(duck);
+
+  const fenceMaterial = new THREE.MeshStandardMaterial({ color: 0xd7c59f, roughness: 0.7 });
+  const fenceHeight = 0.45;
+  const fenceNorth = new THREE.Mesh(new THREE.BoxGeometry(16, 0.2, 0.2), fenceMaterial);
+  fenceNorth.position.set(0, fenceHeight, 4.8);
+  decorGroup.add(fenceNorth);
+
+  const fenceSouth = fenceNorth.clone();
+  fenceSouth.position.set(0, fenceHeight, -7.2);
+  decorGroup.add(fenceSouth);
+
+  const fenceWest = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 12), fenceMaterial);
+  fenceWest.position.set(-8.5, fenceHeight, -1.2);
+  decorGroup.add(fenceWest);
+
+  const fenceEast = fenceWest.clone();
+  fenceEast.position.set(8.5, fenceHeight, -1.2);
+  decorGroup.add(fenceEast);
+
+  const coopPath = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 6),
+    new THREE.MeshStandardMaterial({ color: 0x46311f })
+  );
+  coopPath.rotation.x = -Math.PI / 2;
+  coopPath.position.set(-6, 0.015, -1.2);
+  decorGroup.add(coopPath);
+
 }
 
 function createTree(seed = 0) {
@@ -303,37 +497,29 @@ function createSurveyDrone() {
   return { group };
 }
 
+// ---------------------------------------------------------------------------
+// Task fetching & plot rendering
+// ---------------------------------------------------------------------------
 function buildPlot(task, position) {
-  const height = task.completed ? 0.4 : 0.8;
-  const geometry = new THREE.BoxGeometry(1.4, height, 1.4);
-  const material = new THREE.MeshStandardMaterial({
-    color: colourForTask(task),
-    emissive: task.completed ? 0x253f2f : 0x0,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
+  const height = task.completed ? 0.6 : 0.9;
+  const geometry = new THREE.BoxGeometry(1.6, height, 1.6);
+  const isScript = task.kind === 'script';
+  const topTexture = task.completed
+    ? task.verified
+      ? verifiedTopTex
+      : pendingTopTex
+    : isScript
+    ? scriptTopTex
+    : grassTopTex;
+  const sideTexture = task.completed ? dirtTex : grassSideTex;
+  const materials = createBlockMaterials({ top: topTexture, bottom: dirtTex, side: sideTexture });
+  const mesh = new THREE.Mesh(geometry, materials);
   mesh.position.copy(position);
   mesh.position.y = height / 2;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.userData = { type: 'plot', taskId: task.id };
   return mesh;
-}
-
-function colourForTask(task) {
-  if (task.completed) {
-    return task.verified ? 0x1cc87f : 0xffb347;
-  }
-  if (task.remaining_slots === 0) {
-    return 0xff6b6b;
-  }
-  switch (task.kind) {
-    case 'dataset':
-      return 0x5eb1ff;
-    case 'math_extended':
-      return 0xb080ff;
-    default:
-      return 0x3dd683;
-  }
 }
 
 function clearPlots() {
@@ -351,16 +537,26 @@ function clearPlots() {
 
 function layoutPlots(tasks) {
   clearPlots();
-  const spacing = 3;
-  const cols = Math.max(1, Math.ceil(Math.sqrt(tasks.length)));
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    statusEl.textContent = 'No tasks available. Visit the Coop to plant new workloads.';
+    return;
+  }
+  const spacingX = 2.6;
+  const spacingZ = 2.8;
+  const cols = 5;
+  const rows = Math.max(1, Math.ceil(tasks.length / cols));
+  const startX = -((cols - 1) * spacingX) / 2;
+  const startZ = -((rows - 1) * spacingZ) / 2 - 1.2;
+
   tasks.forEach((task, index) => {
     const row = Math.floor(index / cols);
     const col = index % cols;
-    const position = new THREE.Vector3((col - cols / 2) * spacing, 0, (row - cols / 2) * spacing);
+    const position = new THREE.Vector3(startX + col * spacingX, 0, startZ + row * spacingZ);
     const mesh = buildPlot(task, position);
     plotGroup.add(mesh);
     taskLookup.set(mesh.id, task);
   });
+
   statusEl.textContent = `Plots: ${tasks.length} | Open: ${
     tasks.filter((t) => !t.completed).length
   } | Verified: ${tasks.filter((t) => t.verified).length}`;
@@ -368,7 +564,7 @@ function layoutPlots(tasks) {
 
 async function fetchTasks() {
   try {
-    const res = await fetch(`${API_BASE}/tasks_overview`);
+    const res = await fetch(`${apiBase}/tasks_overview`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -494,9 +690,12 @@ Press E or use the button to open shop menu.`;
   }
 }
 
+// ---------------------------------------------------------------------------
+// Task execution & signing
+// ---------------------------------------------------------------------------
 async function requestTaskAssignment() {
   try {
-    const res = await fetch(`${API_BASE}/get_task`, {
+    const res = await fetch(`${apiBase}/get_task`, {
       headers: { 'X-Worker-Id': WORKER_ID },
     });
     if (res.status === 204) {
@@ -635,7 +834,7 @@ async function submitResult(task, output, metadata) {
   payload.signature = signatureBase64;
 
   try {
-    const res = await fetch(`${API_BASE}/submit_result`, {
+    const res = await fetch(`${apiBase}/submit_result`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -678,13 +877,19 @@ async function claimAndSolveCurrentTask() {
   claimBtn.disabled = false;
 }
 
+// ---------------------------------------------------------------------------
+// Coop panel helpers
+// ---------------------------------------------------------------------------
 async function openShopMenu() {
   if (!focusTarget || focusTarget.object.userData.type !== 'shop') {
     showToast('Head over to the glowing purple Coop to open the panel.');
     return;
   }
 
-  if (!shopPanel.classList.contains('visible')) {
+  if (controls.isLocked) {
+    pendingShopUnlock = true;
+    controls.unlock();
+  } else if (!shopPanel.classList.contains('visible')) {
     showShopPanel();
   }
   selectionEl.textContent = 'Syncing balances…';
@@ -720,7 +925,7 @@ async function seedNewTasks() {
 }
 
 async function seedTasksDirect() {
-  const res = await fetch(`${API_BASE}/generate_tasks`, { method: 'POST' });
+  const res = await fetch(`${apiBase}/generate_tasks`, { method: 'POST' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
@@ -732,6 +937,7 @@ function handleShopAction() {
   if (shopPanel.classList.contains('visible')) {
     hideShopPanel();
     selectionEl.textContent = 'Closed the Coop panel.';
+    lockPointer();
     return;
   }
   openShopMenu();
@@ -776,7 +982,7 @@ async function createScriptTask(source, price) {
     payload: { source },
     required_capabilities: ['script:sandbox'],
   };
-  const res = await fetch(`${API_BASE}/create_task`, {
+  const res = await fetch(`${apiBase}/create_task`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -788,9 +994,21 @@ async function createScriptTask(source, price) {
   return res.json().catch(() => ({}));
 }
 
+function normalizeApiBase(url) {
+  let candidate = url.trim();
+  if (!candidate) {
+    throw new Error('Coordinator URL is required');
+  }
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = `http://${candidate}`;
+  }
+  const parsed = new URL(candidate);
+  return parsed.href.replace(/\/$/, '');
+}
+
 async function updateBalance(showPanel = false) {
   try {
-    const res = await fetch(`${API_BASE}/balance?worker=${encodeURIComponent(WORKER_ID)}`);
+    const res = await fetch(`${apiBase}/balance?worker=${encodeURIComponent(WORKER_ID)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const balance = await res.json();
     balanceEl.textContent = `Trust: ${balance.trust ?? 0} | Tokens: ${balance.token ?? 0}`;
@@ -827,6 +1045,7 @@ function showShopPanel(balance) {
   } else {
     shopInfo.textContent = 'Linking to Coop ledger…';
   }
+  overlay.classList.add('hidden');
 }
 
 function hideShopPanel() {
@@ -834,8 +1053,30 @@ function hideShopPanel() {
   shopBtn.textContent = 'Open Shop Panel';
   shopBtn.dataset.mode = 'balance';
   shopInfo.textContent = 'Step inside the Coop to trade compute or plant new workloads.';
+  if (!controls.isLocked) {
+    overlay.classList.remove('hidden');
+  }
 }
 
+async function onConnectCoordinator() {
+  try {
+    const normalized = normalizeApiBase(apiInput.value || '');
+    if (normalized === apiBase) {
+      showToast('Already connected to this coordinator.');
+      return;
+    }
+    apiBase = normalized;
+    localStorage.setItem('virtual_farm_api_base', apiBase);
+    apiInput.value = apiBase;
+    showToast(`Coordinator set to ${apiBase}`);
+    await ensureRegistration();
+    await refreshScene();
+    await updateBalance(shopPanel.classList.contains('visible'));
+    selectionEl.textContent = `Connected to ${apiBase}. Head to the fields to contribute compute.`;
+  } catch (err) {
+    showToast(`Failed to connect: ${err.message}`);
+  }
+}
 function updateMovement(delta) {
   const velocity = new THREE.Vector3();
   const direction = new THREE.Vector3();
@@ -871,6 +1112,13 @@ function animate() {
     updateMovement(delta);
     updateFocus();
   }
+  dayTimer += delta * 0.2;
+  const lightStrength = 0.55 + Math.max(0, Math.sin(dayTimer)) * 0.35;
+  ambient.intensity = lightStrength;
+  const skyMix = (Math.sin(dayTimer) + 1) / 2;
+  scene.background.copy(nightSkyColor).lerp(daySkyColor, skyMix);
+  sun.intensity = 0.6 + Math.max(0, Math.sin(dayTimer + Math.PI / 3)) * 0.4;
+  sun.position.set(Math.cos(dayTimer) * 10, 8 + Math.sin(dayTimer) * 3, Math.sin(dayTimer) * 10);
   animatedProps.forEach((prop) => {
     if (prop.kind === 'windmill') {
       prop.blades.rotation.z -= delta * 2.2;
@@ -881,7 +1129,7 @@ function animate() {
       prop.group.rotation.y += delta * 0.6;
     }
   });
-  renderer.render(scene, camera);
+  composer.render();
 }
 
 function onKeyDown(event) {
@@ -936,7 +1184,27 @@ function onKeyUp(event) {
 }
 
 function lockPointer() {
+  const element = renderer.domElement;
+  overlay.classList.add('hidden');
+  crosshairEl.classList.remove('hidden');
+  if (element.focus) {
+    element.focus({ preventScroll: true });
+  }
+  const request =
+    element.requestPointerLock ||
+    element.mozRequestPointerLock ||
+    element.webkitRequestPointerLock;
+  if (request) {
+    request.call(element);
+  }
   controls.lock();
+  setTimeout(() => {
+    if (document.pointerLockElement !== element) {
+      overlay.classList.remove('hidden');
+      crosshairEl.classList.add('hidden');
+      showToast('Click directly on the world, then press Enter Farm again to lock the cursor.');
+    }
+  }, 250);
 }
 
 controls.addEventListener('lock', () => {
@@ -945,10 +1213,30 @@ controls.addEventListener('lock', () => {
 });
 
 controls.addEventListener('unlock', () => {
-  overlay.classList.remove('hidden');
   keyState.forward = keyState.backward = keyState.left = keyState.right = false;
   crosshairEl.classList.add('hidden');
-  hideShopPanel();
+  if (pendingShopUnlock) {
+    overlay.classList.add('hidden');
+    if (!shopPanel.classList.contains('visible')) {
+      showShopPanel();
+    }
+  } else {
+    overlay.classList.remove('hidden');
+    hideShopPanel();
+  }
+  pendingShopUnlock = false;
+});
+
+document.addEventListener('pointerlockerror', () => {
+  overlay.classList.remove('hidden');
+  crosshairEl.classList.add('hidden');
+  showToast('Pointer lock was blocked. Try clicking directly on the scene and press Enter Farm again.');
+});
+
+renderer.domElement.addEventListener('click', () => {
+  if (!controls.isLocked) {
+    lockPointer();
+  }
 });
 
 window.addEventListener('keydown', onKeyDown);
@@ -957,6 +1245,8 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  pixelPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
 });
 enterBtn.addEventListener('click', lockPointer);
 
@@ -964,11 +1254,23 @@ claimBtn.addEventListener('click', () => claimAndSolveCurrentTask());
 shopBtn.addEventListener('click', () => handleShopAction());
 plantBtn.addEventListener('click', () => onPlantTask());
 seedClassicBtn.addEventListener('click', () => seedNewTasks());
-closePanelBtn.addEventListener('click', () => hideShopPanel());
+connectBtn.addEventListener('click', () => onConnectCoordinator());
+apiInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    onConnectCoordinator();
+  }
+});
+closePanelBtn.addEventListener('click', () => {
+  hideShopPanel();
+  lockPointer();
+  selectionEl.textContent = 'Back in the field—find a plot to harvest or plant more jobs.';
+});
 
 async function bootstrap() {
   await ensureRegistration();
   const tasks = await refreshScene();
+  await updateBalance(false).catch(() => {});
   if (!tasks || tasks.length === 0) {
     try {
       await seedTasksDirect();
