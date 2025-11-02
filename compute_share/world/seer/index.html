@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>The Seer of Shared Compute</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <h1>The Seer</h1>
+        <p>
+          Approach the oracle of shared compute. Choose one of her cards to divine your fate, request her aid, or lend her your power.
+        </p>
+        <div class="api-control">
+          <label for="api-base">Coordinator URL</label>
+          <input id="api-base" type="text" placeholder="http://127.0.0.1:8080" />
+          <button id="connect-btn">Connect</button>
+          <span id="api-status" class="status">Not connected</span>
+        </div>
+      </header>
+
+      <section class="cards">
+        <article class="card" id="fate-card">
+          <h2>Card I — Threads of Fate</h2>
+          <p>
+            The Seer channels a Kaggle-trained deep net to glimpse your mortality. Feed her the strands of your life.
+          </p>
+          <form id="fate-form">
+            <label>Age<input type="number" id="age" min="0" max="120" required /></label>
+            <label>City<input type="text" id="city" required /></label>
+            <label>Country<input type="text" id="country" required /></label>
+            <label>Ethnicity<input type="text" id="ethnicity" placeholder="Optional" /></label>
+            <button type="submit">Reveal my fate</button>
+          </form>
+          <div class="result" id="fate-result"></div>
+        </article>
+
+        <article class="card" id="request-card">
+          <h2>Card II — Invoke the Seer</h2>
+          <p>
+            Need compute? Offer a bounty and the Seer will dispatch workers to solve it.
+          </p>
+          <form id="request-form">
+            <label>Job Title<input type="text" id="job-title" placeholder="square / sqrt / double / script_eval" required /></label>
+            <label>Input Value<input type="number" id="job-input" step="any" value="7" required /></label>
+            <label>Bounty (tokens)<input type="number" id="job-bounty" value="1" min="0" /></label>
+            <label>Payload (JSON)
+              <textarea id="job-payload" placeholder='{"source":"print(5 + 6)"}'></textarea>
+            </label>
+            <button type="submit">Request aid</button>
+          </form>
+          <div class="result" id="request-result"></div>
+        </article>
+
+        <article class="card" id="assist-card">
+          <h2>Card III — Aid the Seer</h2>
+          <p>
+            Offer your machines. Claim a task and return with the result to earn trust.
+          </p>
+          <form id="assist-form">
+            <label>Worker Name<input type="text" id="worker-name" value="seer-volunteer" required /></label>
+            <button type="submit">Fetch a task</button>
+          </form>
+          <div class="result" id="assist-result"></div>
+          <div id="assist-preview" class="result muted hidden"></div>
+          <form id="submit-form" class="hidden">
+            <button type="submit">Send result to the Seer</button>
+          </form>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

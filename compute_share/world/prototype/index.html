@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Bridging Worlds – Virtual Farm</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        font-family: 'Press Start 2P', monospace;
+        background: radial-gradient(circle at 20% 20%, #101b2d, #050910);
+        color: #f6f8fa;
+        letter-spacing: 0.5px;
+      }
+      #scene {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
+      #hud {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        padding: 10px 14px;
+        background: rgba(13, 17, 23, 0.9);
+        border-radius: 4px;
+        border: 3px solid #2c3a4c;
+        box-shadow: inset 0 0 0 2px #596b7d, 0 10px 24px rgba(0, 0, 0, 0.45);
+        max-width: 260px;
+        image-rendering: pixelated;
+      }
+      #hud h1 {
+        margin: 0 0 6px;
+        font-size: 14px;
+        text-transform: uppercase;
+      }
+      #hud p {
+        margin: 4px 0;
+        font-size: 10px;
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+      .btn {
+        margin-top: 6px;
+        padding: 6px 8px;
+        background: #1b7a30;
+        border: 3px solid #0f3f19;
+        border-radius: 3px;
+        color: #fff;
+        cursor: pointer;
+        box-shadow: inset -4px -4px 0 #0c2c12;
+        text-transform: uppercase;
+        font-size: 10px;
+      }
+      .btn:disabled {
+        background: #2a2d34;
+        cursor: not-allowed;
+        box-shadow: inset -4px -4px 0 #1c1e24;
+      }
+      #shop-btn {
+        background: #5533a8;
+        border-color: #2b1a58;
+        box-shadow: inset -4px -4px 0 #1c0f3a;
+      }
+      #lock-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 12px;
+        background: rgba(8, 13, 19, 0.92);
+        transition: opacity 0.3s ease;
+      }
+      #lock-overlay.hidden {
+        pointer-events: none;
+        opacity: 0;
+      }
+      #lock-overlay button {
+        font-size: 14px;
+        padding: 14px 28px;
+        border-radius: 4px;
+        border: 4px solid #0f3f19;
+        background: #1b7a30;
+        color: white;
+        cursor: pointer;
+        box-shadow: inset -4px -4px 0 #0c2c12;
+      }
+      #toast {
+        position: absolute;
+        bottom: 24px;
+        right: 24px;
+        background: rgba(13, 17, 23, 0.92);
+        border-radius: 6px;
+        border: 4px solid #2c3a4c;
+        padding: 14px 18px;
+        box-shadow: inset 0 0 0 2px #596b7d, 0 10px 24px rgba(0,0,0,0.45);
+        opacity: 0;
+        transform: translateY(20px);
+        transition: opacity 0.3s ease, transform 0.3s ease;
+        pointer-events: none;
+        min-width: 240px;
+      }
+      #toast.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      #hud .stats {
+        margin-bottom: 8px;
+        padding: 8px 10px;
+        background: rgba(35, 134, 54, 0.15);
+        border-radius: 8px;
+      }
+      #crosshair {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 12px;
+        height: 12px;
+        margin-left: -6px;
+        margin-top: -6px;
+        border-radius: 50%;
+        border: 2px solid rgba(243, 244, 246, 0.7);
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      #crosshair.hidden {
+        opacity: 0;
+      }
+      #shop-panel {
+        position: absolute;
+        right: 24px;
+        top: 24px;
+        width: 360px;
+        padding: 20px;
+        border-radius: 6px;
+        background: rgba(10, 13, 20, 0.95);
+        border: 4px solid #403225;
+        box-shadow: inset 0 0 0 2px #7a6141, 0 12px 40px rgba(0, 0, 0, 0.55);
+        display: none;
+        flex-direction: column;
+        gap: 12px;
+        image-rendering: pixelated;
+      }
+      #shop-panel.visible {
+        display: flex;
+      }
+      #shop-panel h2 {
+        margin: 0;
+        font-size: 16px;
+        text-transform: uppercase;
+      }
+      #shop-panel label {
+        font-size: 11px;
+        opacity: 0.8;
+      }
+      #shop-panel textarea,
+      #shop-panel input {
+        width: 100%;
+        border-radius: 8px;
+        border: 4px solid #2c3a4c;
+        background: rgba(17, 24, 39, 0.95);
+        color: #f8fafc;
+        padding: 8px 10px;
+        font-family: 'Press Start 2P', monospace;
+        font-size: 11px;
+      }
+      #shop-panel textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+      #shop-panel-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .panel-btn {
+        flex: 1 1 calc(50% - 8px);
+        background: #1b7a30;
+        color: #fff;
+        border: 4px solid #0f3f19;
+        padding: 10px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        box-shadow: inset -4px -4px 0 #0c2c12;
+        text-transform: uppercase;
+      }
+      .panel-btn.secondary {
+        background: #30363d;
+        border-color: #202225;
+        box-shadow: inset -4px -4px 0 #16171a;
+      }
+      .panel-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .inline-input {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .inline-input input {
+        flex: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="lock-overlay">
+      <h1>Enter the Compute Farm</h1>
+      <p>Click to step into the virtual world. Use <strong>WASD</strong> to move, <strong>mouse</strong> to look, and <strong>E</strong> to interact.</p>
+      <button id="enter-btn">Enter Farm</button>
+    </div>
+    <div id="hud">
+      <h1>Virtual Farm Console</h1>
+      <p class="stats" id="balance">Trust: -- | Tokens: --</p>
+      <p id="status">Loading task plots…</p>
+      <p id="selection">Walk to a plot or shop to interact.</p>
+      <button id="claim-btn" class="btn" disabled>Claim &amp; Solve Task (E)</button>
+      <button id="shop-btn" class="btn" disabled>Open Shop Panel</button>
+    </div>
+    <div id="toast"></div>
+    <div id="shop-panel">
+      <h2>Compute Coop</h2>
+      <p id="shop-info">Syncing…</p>
+      <div class="panel-section">
+        <label for="script-input">Plant a script workload (JS snippet returning a number)</label>
+        <textarea id="script-input" placeholder="print(5 + 6)"></textarea>
+        <label for="bounty-input">Reward (tokens)</label>
+        <input id="bounty-input" type="number" min="0" max="10" step="1" value="1" />
+      </div>
+      <div class="panel-section">
+        <label for="api-input">Coordinator URL</label>
+        <div class="inline-input">
+          <input id="api-input" type="text" placeholder="http://127.0.0.1:8080" />
+          <button id="connect-btn" class="panel-btn secondary" style="flex:0 0 auto;">Connect</button>
+        </div>
+      </div>
+      <div id="shop-panel-actions">
+        <button id="plant-btn" class="panel-btn">Plant Script Task</button>
+        <button id="seed-classic" class="panel-btn secondary">Grow Classic Tasks</button>
+        <button id="close-panel" class="panel-btn secondary">Close</button>
+      </div>
+    </div>
+    <div id="crosshair" class="hidden"></div>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.167/build/three.module.js",
+          "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.167/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
